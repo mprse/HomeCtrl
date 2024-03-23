@@ -1,0 +1,14 @@
+diff --git a/portable/ThirdParty/GCC/RP2040/library.cmake b/portable/ThirdParty/GCC/RP2040/library.cmake
+index 33968de85..0ccceba4e 100644
+--- a/portable/ThirdParty/GCC/RP2040/library.cmake
++++ b/portable/ThirdParty/GCC/RP2040/library.cmake
+@@ -40,7 +40,7 @@ target_link_libraries(FreeRTOS-Kernel INTERFACE
+ 
+ target_compile_definitions(FreeRTOS-Kernel INTERFACE
+         LIB_FREERTOS_KERNEL=1
+-        FREE_RTOS_KERNEL_SMP=1
++        FREE_RTOS_KERNEL_SMP=0
+ )
+ 
+ add_library(FreeRTOS-Kernel-Static INTERFACE)
+ 
