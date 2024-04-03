@@ -10,58 +10,48 @@
 #include "task.h"
 
 #include <lwip/sockets.h>
-#include <dht.h>
 #include"tcp_server.h"
 #include "pico/bootrom.h"
+#include "dht22.h"
 
-typedef struct {
-    float humidity;
-    float temperature;
-} dht_data_t;
 
 #define DHT_COUNT 10
+#define DHT_ERR_TRESHOLD 5
 static const uint dht_pins[DHT_COUNT] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9};
-static const dht_model_t dht_model = DHT22;
-static dht_t dht_dev[DHT_COUNT];
-static dht_data_t dht_values[DHT_COUNT] = {0};
+static uint dht_err[DHT_COUNT] = {0};
+static dht_reading_t dht_dev[DHT_COUNT];
+static const uint dht_power_pin = 26;
 
-#define CONT_COUNT 9
-static const uint contractron_pins[CONT_COUNT] = {16, 17, 18, 19, 20, 21, 22, 26, 27};
-static uint contractron_state[CONT_COUNT] = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff};
+#define CONT_COUNT 7
+static const uint contractron_pins[CONT_COUNT] = {16, 17, 18, 19, 20, 21, 22};
+static uint contractron_state[CONT_COUNT] = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff};
+
+
+static const uint gate_pin = 15;
+
 
 static int server_connection = -1;
 
-static uint push_all = 0;
+static bool push_dht_all = false; // push all data to client (sync)
+static bool push_con_all = false; // push all data to client (sync)
 
 static  void print_dht_error(int i, const char* error_message) {
     printf("DHT(%d): %s\n", i, error_message);
 }
 
-static void send_dht_data_to_client(int i, dht_data_t dht_date) {
+static void send_dht_data_to_client(int i) {
     char msg[100];
-    sprintf(msg, "{\"dht_id\": %d, \"temperature\": %.1f, \"humidity\": %.1f}", i, dht_date.temperature, dht_date.humidity);
+    sprintf(msg, "{\"dht_id\": \"%d\", \"temp\": \"%.1f\", \"hum\": \"%.1f\"}", i, dht_dev[i].temp_celsius, dht_dev[i].humidity);
     tcp_send_message(server_connection, msg);
-    printf("DHT(%d): %.1f C, %.1f%% humidity\n", i, dht_date.temperature, dht_date.humidity);
 }
 
-static dht_result_t read_dht(uint dht_id, dht_data_t* dht_data)
+static uint8_t dht_read_safe(uint dht_id)
 {
-    float humidity;
-    float temperature_c;
-    dht_data_t data = {0};
+    portDISABLE_INTERRUPTS();
+    uint8_t status = dht_read(&dht_dev[dht_id]);
+    portENABLE_INTERRUPTS();
 
-    dht_start_measurement(&dht_dev[dht_id]);
-
-    dht_result_t result = dht_finish_measurement_blocking(&dht_dev[dht_id], &humidity, &temperature_c);
-    if (result == DHT_RESULT_OK) {
-        dht_data->humidity = humidity;
-        dht_data->temperature = temperature_c;
-    } else {
-        dht_data->humidity = 0;
-        dht_data->temperature = 0;
-    }
-
-    return result;
+    return status;
 }
 
 static bool read_contactron(uint contactron_id)
@@ -69,57 +59,85 @@ static bool read_contactron(uint contactron_id)
     return gpio_get(contractron_pins[contactron_id]);
 }
 
-void temp_task()
+static void temp_task()
 {
-    dht_data_t new_data = {0};
-    dht_result_t dht_result = 0;
+    uint8_t dht_result = 0;
+    const uint8_t force_sync = 10;
+    uint8_t force_sync_cnt = force_sync;
 
     while (true) {
+        gpio_put(dht_power_pin, 1);
+        vTaskDelay(pdMS_TO_TICKS(500));
+
         for(int i = 0; i < DHT_COUNT; i++)
         {
-            dht_result = read_dht(i, &new_data);
-            if (dht_result == DHT_RESULT_BAD_CHECKSUM) {
-                print_dht_error(i, "Bad checksum - repeat.");
-                dht_result = read_dht(i, &new_data);
-            }
+            dht_reading_t old = dht_dev[i];
+            dht_result = dht_read_safe(i);
 
             switch (dht_result) {
-                case DHT_RESULT_BAD_CHECKSUM:
-                    print_dht_error(i, "Bad checksum - skip.");
+                case DHT_ERR_CHECKSUM:
+                    print_dht_error(i, "Bad checksum.");
+                    dht_err[i]++;
                     break;
-                case DHT_RESULT_TIMEOUT:
-                    print_dht_error(i, "Sensor not responding.");
+                case DHT_ERR_NAN:
+                    print_dht_error(i, "Invalid value (nan).");
+                    dht_err[i]++;
                     break;
-                case DHT_RESULT_OK:
-                    if (push_all || (new_data.humidity != dht_values[i].humidity || new_data.temperature != dht_values[i].temperature)) {
-                        dht_values[i] = new_data;
-                        send_dht_data_to_client(i, new_data);
+                case DHT_ERR_TIMEOUT:
+                    print_dht_error(i, "Sensor is not responding.");
+                    dht_err[i]++;
+                    break;
+                case DHT_OK:
+                    dht_err[i] = 0;
+                    printf("DHT(%d): %.1f C, %.1f%% humidity\n", i, dht_dev[i].temp_celsius, dht_dev[i].humidity);
+                    if (push_dht_all || (dht_dev[i].humidity != old.humidity || dht_dev[i].temp_celsius != old.temp_celsius)) {
+                        send_dht_data_to_client(i);
                     }
                     break;
             }
+            // 200 ms between reads
+            vTaskDelay(pdMS_TO_TICKS(200));
         }
-        push_all = 0;       
-        vTaskDelay(10000);
+        if (force_sync_cnt == 0) {
+            push_dht_all = true;
+            force_sync_cnt = force_sync;
+        } else {
+            force_sync_cnt--;
+            push_dht_all = false;
+        }
+        
+        for (int i = 0; i < DHT_COUNT; i++) {
+            if ((i==0 || i==1 || i==2 || i==4 || i==5 || i==6) && dht_err[i] >= DHT_ERR_TRESHOLD) {
+                printf("DHT RESET id: %d\n", i);
+                gpio_put(dht_power_pin, 0);
+                dht_err[i] = 0;
+            }
+        }
+        // Read every 1 minute
+        gpio_put(dht_power_pin, 0);
+        vTaskDelay(pdMS_TO_TICKS(20000));
     }
 }
 
-void contactron_task()
+static void contactron_task()
 {
     // Read all contactrons states and send changed states by udp
     char msg[50];
+
     while (true) {
         for (int i = 0; i < CONT_COUNT; i++) {
             bool state = read_contactron(i);
-            if (state != contractron_state[i]) {
+            if (state != contractron_state[i] || push_con_all) {
                 printf("Contactron %d changed state to %d\n", i, state);
                 contractron_state[i] = state;
                 snprintf(msg, 50, "{\"cont_id\":\"%d\", \"val\":\"%d\"}", i, state);
                 tcp_send_message(server_connection, msg);
             }
+            vTaskDelay(pdMS_TO_TICKS(100));
         }
-    }   
-
-    vTaskDelay(10000);
+        push_con_all = false;
+        vTaskDelay(pdMS_TO_TICKS(500));
+    }
 }
 
 
@@ -128,7 +146,10 @@ static void on_tcp_connection(int con_id)
     printf("TCP connected, connection id: %d\n", con_id);
     cyw43_arch_gpio_put(0, true);
     server_connection = con_id;
-    push_all = 1;
+    push_dht_all = true;
+    push_con_all = true;
+    xTaskCreate(temp_task, "TEMP_Task", 1024, NULL, TCP_TASK_PRIORITY+1, NULL);
+    xTaskCreate(contactron_task, "CONT_Task", 1024, NULL, TCP_TASK_PRIORITY-1, NULL);
 }
 
 static void on_tcp_disconnection(int con_id)
@@ -146,6 +167,12 @@ static void on_tcp_msg_received(int con_id, char* msg)
         reset_usb_boot(0, 0);
     } else if (strcmp(msg, "reboot") == 0) {
         reboot();
+    } else if (strcmp(msg, "sync") == 0) {
+        push_dht_all = true; 
+    } else if (strcmp(msg, "brama") == 0) {
+        gpio_put(gate_pin, 1);
+        sleep_ms(300);
+        gpio_put(gate_pin, 0);
     }
 }
 
@@ -155,25 +182,36 @@ int main(void)
 
     printf("--- Starting HomeCtrl ---\n");
 
+    printf("Init sensors\n");
+
     // Init DHT sensors
     for (int i = 0; i < DHT_COUNT; i++) {
-        dht_init(&dht_dev[i], dht_model, pio0, dht_pins[i], true /* pull_up */);
+        dht_dev[i] = dht22_init(dht_pins[i]);
     }
 
     // Init contactrons
     for (int i = 0; i < CONT_COUNT; i++) {
         gpio_init(contractron_pins[i]);
         gpio_set_dir(contractron_pins[i], GPIO_IN);
-        gpio_pull_down(contractron_pins[i]);
+        gpio_pull_up(contractron_pins[i]);
     }
+
+    gpio_init(dht_power_pin);
+    gpio_set_dir(dht_power_pin, GPIO_OUT);
+    gpio_put(dht_power_pin, 0);
+
+    gpio_init(gate_pin);
+    gpio_set_dir(gate_pin, GPIO_OUT);
+    gpio_put(gate_pin, 0);
+
+    printf("Wait 1 sec before connecting to wifi \n");
+    sleep_ms(1000);
+    printf("xxx \n");
 
     // Init TCP server
     tcp_server_init(on_tcp_connection, on_tcp_disconnection, on_tcp_msg_received);
 
-    xTaskCreate(tcp_server_task, "tcp_server_task", configMINIMAL_STACK_SIZE, NULL, TCP_TASK_PRIORITY, NULL);
-    xTaskCreate(temp_task, "TEMP_Task", 256, NULL, 1, NULL);
-    xTaskCreate(contactron_task, "CONT_Task", 256, NULL, 1, NULL);
-    
+    xTaskCreate(tcp_server_task, "tcp_server_task", 2*configMINIMAL_STACK_SIZE, NULL, TCP_TASK_PRIORITY, NULL);
 
     vTaskStartScheduler();
 }
