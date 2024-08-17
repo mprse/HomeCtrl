@@ -88,6 +88,11 @@ static void temp_task()
                     dht_err[i]++;
                     break;
                 case DHT_OK:
+                    if(dht_dev[i].temp_celsius < 10.0f || dht_dev[i].temp_celsius > 60.0f || dht_dev[i].humidity < 20.0f || dht_dev[i].humidity > 95.0f) {
+                        printf("Invalid value: DHT(%d): %.1f C, %.1f%% humidity\n", i, dht_dev[i].temp_celsius, dht_dev[i].humidity);
+                        dht_err[i]++;
+                        break;
+                    }
                     dht_err[i] = 0;
                     printf("DHT(%d): %.1f C, %.1f%% humidity\n", i, dht_dev[i].temp_celsius, dht_dev[i].humidity);
                     if (push_dht_all || (dht_dev[i].humidity != old.humidity || dht_dev[i].temp_celsius != old.temp_celsius)) {
@@ -140,7 +145,6 @@ static void contactron_task()
     }
 }
 
-
 static void on_tcp_connection(int con_id)
 {
     printf("TCP connected, connection id: %d\n", con_id);
@@ -169,6 +173,8 @@ static void on_tcp_msg_received(int con_id, char* msg)
         reboot();
     } else if (strcmp(msg, "sync") == 0) {
         push_dht_all = true; 
+    } else if (strcmp(msg, "ping") == 0) {
+        tcp_send_message(server_connection, "pong");
     } else if (strcmp(msg, "brama") == 0) {
         gpio_put(gate_pin, 1);
         sleep_ms(300);
@@ -206,7 +212,6 @@ int main(void)
 
     printf("Wait 1 sec before connecting to wifi \n");
     sleep_ms(1000);
-    printf("xxx \n");
 
     // Init TCP server
     tcp_server_init(on_tcp_connection, on_tcp_disconnection, on_tcp_msg_received);
