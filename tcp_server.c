@@ -140,52 +140,6 @@ void tcp_send_message(int con_id, char *msg)
 }
 
 
-#include "lwip/pbuf.h"
-#include "lwip/udp.h"
-
-#define UDP_PORT 4444
-#define BEACON_MSG_LEN_MAX 127
-#define BEACON_TARGET "255.255.255.255"
-#define BEACON_INTERVAL_MS 5000
-
-void run_udp_beacon() {
-    struct udp_pcb* pcb = udp_new();
-
-    ip_addr_t addr;
-    ipaddr_aton(BEACON_TARGET, &addr);
-
-    int counter = 0;
-    while (true) {
-        struct pbuf *p = pbuf_alloc(PBUF_TRANSPORT, BEACON_MSG_LEN_MAX+1, PBUF_RAM);
-        char *req = (char *)p->payload;
-        memset(req, 0, BEACON_MSG_LEN_MAX+1);
-        snprintf(req, BEACON_MSG_LEN_MAX, "%d\n", counter);
-        err_t er = udp_sendto(pcb, p, &addr, UDP_PORT);
-        pbuf_free(p);
-        if (er != ERR_OK) {
-            printf("Failed to send UDP packet! error=%d", er);
-        } else {
-            printf("Sent packet %d\n", counter);
-            counter++;
-        }
-
-        // Note in practice for this simple UDP transmitter,
-        // the end result for both background and poll is the same
-
-#if PICO_CYW43_ARCH_POLL
-        // if you are using pico_cyw43_arch_poll, then you must poll periodically from your
-        // main loop (not from a timer) to check for Wi-Fi driver or lwIP work that needs to be done.
-        cyw43_arch_poll();
-        sleep_ms(BEACON_INTERVAL_MS);
-#else
-        // if you are not using pico_cyw43_arch_poll, then WiFI driver and lwIP work
-        // is done via interrupt in the background. This sleep is just an example of some (blocking)
-        // work you might be doing.
-        sleep_ms(BEACON_INTERVAL_MS);
-#endif
-    }
-}
-
 void tcp_server_task(__unused void *params)
 {
     if (cyw43_arch_init())
@@ -207,8 +161,8 @@ void tcp_server_task(__unused void *params)
     }
     printf("Connected.\n");
 
-
     run_server();
     cyw43_arch_deinit();
     vTaskDelete(NULL);
 }
+
