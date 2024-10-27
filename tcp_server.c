@@ -88,7 +88,7 @@ static void run_server()
         {
             .sin_len = sizeof(struct sockaddr_in),
             .sin_family = AF_INET,
-            .sin_port = htons(1234),
+            .sin_port = htons(TCP_SERVER_PORT),
             .sin_addr = 0,
         };
 

@@ -1,5 +1,6 @@
 cmake_minimum_required(VERSION 3.12)
 include(${PICO_SDK_PATH}/pico_sdk_init.cmake)
+include(${PICO_EXTRAS_PATH}/external/pico_extras_import.cmake)
 
 project(HomeCtrl C CXX ASM)
 
@@ -33,8 +34,13 @@ add_executable(HomeCtrl
         dht22.c)
 
 target_compile_definitions(HomeCtrl PRIVATE
-        WIFI_SSID=\"MojaPolinezja\"
-        WIFI_PASSWORD=\"dupa1212\"
+        WIFI_SSID=\"NibyPolinezja\"
+        WIFI_PASSWORD=\"dupa2713\"
+        DHT_ENABLED=1
+        CONT_ENABLED=1
+        HEAT_ENABLED=1
+        GATE_ENABLED=1
+        TCP_SERVER_PORT=1234
         NO_SYS=0
         PICO_DEFAULT_UART_TX_PIN=28)
 target_include_directories(HomeCtrl PRIVATE
@@ -44,6 +50,8 @@ target_link_libraries(HomeCtrl
         pico_cyw43_arch_lwip_sys_freertos
         pico_stdlib
         pico_lwip_iperf
-        FreeRTOS-Kernel-Heap4)
+        FreeRTOS-Kernel-Heap4
+        hardware_rtc
+        hardware_sleep)
 
 pico_add_extra_outputs(HomeCtrl)

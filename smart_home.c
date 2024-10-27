@@ -14,28 +14,14 @@
 #include "pico/bootrom.h"
 #include "dht22.h"
 
+#include "config.h"
 
-#define DHT_COUNT 6
-#define HEAT_ZONE_COUNT 6
 #define DHT_ERR_TRESHOLD 5
-static const uint dht_pins[DHT_COUNT] = {0, 1, 2, 4, 5, 6};
-static uint dht_err[DHT_COUNT] = {0};
-static dht_reading_t dht_dev[DHT_COUNT];
-static const uint dht_power_pin = 26;
-
-static const uint heat_zone_pins[HEAT_ZONE_COUNT] = {7, 8, 9, 10, 11, 12};
-
-#define CONT_COUNT 7
-static const uint contractron_pins[CONT_COUNT] = {16, 17, 18, 19, 20, 21, 22};
-static uint contractron_state[CONT_COUNT] = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff};
-
-static const uint gate_pin = 15;
-
 
 static int server_connection = -1;
 
+#if DHT_ENABLED == 1
 static bool push_dht_all = false; // push all data to client (sync)
-static bool push_con_all = false; // push all data to client (sync)
 
 static  void print_dht_error(int i, const char* error_message) {
     printf("DHT: DHT(%d): %s\n", i, error_message);
@@ -54,11 +40,6 @@ static uint8_t dht_read_safe(uint dht_id)
     portENABLE_INTERRUPTS();
 
     return status;
-}
-
-static bool read_contactron(uint contactron_id)
-{
-    return gpio_get(contractron_pins[contactron_id]);
 }
 
 static void temp_task()
@@ -116,6 +97,15 @@ static void temp_task()
         vTaskDelay(pdMS_TO_TICKS(30000));
     }
 }
+#endif
+
+#if CONT_ENABLED == 1
+static bool push_con_all = false; // push all data to client (sync)
+
+static bool read_contactron(uint contactron_id)
+{
+    return gpio_get(contractron_pins[contactron_id]);
+}
 
 static void contactron_task()
 {
@@ -137,16 +127,21 @@ static void contactron_task()
         vTaskDelay(pdMS_TO_TICKS(500));
     }
 }
+#endif
 
 static void on_tcp_connection(int con_id)
 {
     printf("--> TCP connected, connection id: %d\n", con_id);
     cyw43_arch_gpio_put(0, true);
     server_connection = con_id;
+#if DHT_ENABLED == 1
     push_dht_all = true;
-    push_con_all = true;
     xTaskCreate(temp_task, "TEMP_Task", 1024, NULL, TCP_TASK_PRIORITY+1, NULL);
+#endif
+#if CONT_ENABLED == 1
+    push_con_all = true;
     xTaskCreate(contactron_task, "CONT_Task", 1024, NULL, TCP_TASK_PRIORITY-1, NULL);
+#endif
 }
 
 static void on_tcp_disconnection(int con_id)
@@ -168,14 +163,22 @@ static void on_tcp_msg_received(int con_id, char* msg)
     } else if (strcmp(msg, "reboot") == 0) {
         reboot();
     } else if (strcmp(msg, "sync") == 0) {
+#if DHT_ENABLED == 1
         push_dht_all = true;
-    } else if (strcmp(msg, "ping") == 0) {
+#endif
+    }
+    else if (strcmp(msg, "ping") == 0) {
         tcp_send_message(server_connection, "pong");
-    } else if (strcmp(msg, "brama") == 0) {
+    }
+#if GATE_ENABLED == 1
+    else if (strcmp(msg, "brama") == 0) {
         gpio_put(gate_pin, 1);
         sleep_ms(300);
         gpio_put(gate_pin, 0);
-    } else if (sscanf(msg, "%s %d %d", command, &zone_id, &state) == 3) {
+    }
+#endif
+#if HEAT_ENABLED == 1
+    else if (sscanf(msg, "%s %d %d", command, &zone_id, &state) == 3) {
         // Check if the command is "heat"
         if (strcmp(command, "heat") == 0) {
             // Set the pin state based on the zone_id and state
@@ -187,6 +190,7 @@ static void on_tcp_msg_received(int con_id, char* msg)
     } else {
         printf("ERROR: Invalid message\n");
     }
+#endif
 }
 
 int main(void)
@@ -197,6 +201,7 @@ int main(void)
 
     printf("--> Init stage\n");
 
+#if DHT_ENABLED == 1
     // Init DHT sensors
     for (int i = 0; i < DHT_COUNT; i++) {
         dht_dev[i] = dht22_init(dht_pins[i]);
@@ -206,25 +211,32 @@ int main(void)
     gpio_init(dht_power_pin);
     gpio_set_dir(dht_power_pin, GPIO_OUT);
     gpio_put(dht_power_pin, 0);
+#endif
 
+#if CONT_ENABLED == 1
     // Init contactrons
     for (int i = 0; i < CONT_COUNT; i++) {
         gpio_init(contractron_pins[i]);
         gpio_set_dir(contractron_pins[i], GPIO_IN);
         gpio_pull_up(contractron_pins[i]);
     }
+#endif
 
+#if HEAT_ENABLED == 1
     // Init heating zones
     for (int i = 0; i < HEAT_ZONE_COUNT; i++) {
         gpio_init(heat_zone_pins[i]);
         gpio_set_dir(heat_zone_pins[i], GPIO_OUT);
         gpio_put(heat_zone_pins[i], 1);
     }
+#endif
 
+#if GATE_ENABLED == 1
     // Init gate control pin
     gpio_init(gate_pin);
     gpio_set_dir(gate_pin, GPIO_OUT);
     gpio_put(gate_pin, 0);
+#endif
 
     sleep_ms(1000);
 
