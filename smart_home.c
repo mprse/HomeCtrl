@@ -50,7 +50,7 @@ static void temp_task()
 
     while (true) {
         gpio_put(dht_power_pin, 1);
-        vTaskDelay(pdMS_TO_TICKS(500));
+        vTaskDelay(pdMS_TO_TICKS(1000));
 
         for(int i = 0; i < DHT_COUNT; i++)
         {
