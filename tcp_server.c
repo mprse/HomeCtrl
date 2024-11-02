@@ -36,24 +36,29 @@ static void send_message(int socket, char *msg)
 
 static int handle_single_command(int conn_sock)
 {
-    char buffer[128];
+    char buffer[256];
     int done = 0;
-    while (done < sizeof(buffer))
+    while (1)
     {
-        int done_now = recv(conn_sock, buffer + done, sizeof(buffer) - done, 0);
+        int done_now = recv(conn_sock, buffer + done, sizeof(buffer) - done - 1, 0);
         if (done_now <= 0)
             return -1;
 
         done += done_now;
-        char *end = strnstr(buffer, "\n", done);
-        if (!end)
-            continue;
+        buffer[done] = '\0'; // Null-terminate the buffer
 
-        *end = 0;
+        char *start = buffer;
+        char *end;
+        while ((end = strchr(start, '\n')))
+        {
+            *end = '\0';
+            on_msg_received(conn_sock, start);
+            start = end + 1;
+        }
 
-        on_msg_received(conn_sock, buffer);
-
-        break;
+        // Move remaining data to the beginning of the buffer
+        done = strlen(start);
+        memmove(buffer, start, done);
     }
 
     return 0;
