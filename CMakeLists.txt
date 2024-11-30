@@ -40,6 +40,7 @@ target_compile_definitions(HomeCtrl PRIVATE
         CONT_ENABLED=1
         HEAT_ENABLED=1
         GATE_ENABLED=1
+        BEEPER_ENABLED=1
         TCP_SERVER_PORT=1234
         NO_SYS=0
         PICO_DEFAULT_UART_TX_PIN=28)
