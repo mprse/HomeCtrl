@@ -27,4 +27,18 @@ static uint contractron_state[] = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff};
 static const uint gate_pin = 15;
 #endif
 
+#if BEEPER_ENABLED == 1
+typedef enum beeper_state {
+    ALARM_OFF = 0,
+    ALARM_ARM,
+    ALARM_DISARM,
+    ALARM_DETECTION,
+    ALARM_RUN
+} beeper_state_t;
+
+static const uint beeper_pin = 14;
+static volatile beeper_state_t beeper_state = ALARM_OFF;
+static volatile beeper_state_t next_beeper_state = ALARM_OFF;
+#endif
+
 #endif
