@@ -24,13 +24,13 @@ add_executable(HomeCtrl
 target_compile_definitions(HomeCtrl PRIVATE
         WIFI_SSID=\"NibyPolinezja\"
         WIFI_PASSWORD=\"dupa2713\"
-        DHT_ENABLED=0
-        CONT_ENABLED=0
-        HEAT_ENABLED=0
-        GATE_ENABLED=0
-        BEEPER_ENABLED=0
+        DHT_ENABLED=1
+        CONT_ENABLED=1
+        HEAT_ENABLED=1
+        GATE_ENABLED=1
+        BEEPER_ENABLED=1
         WATERING_ENABLED=0
-        TCP_SERVER_PORT=1236
+        TCP_SERVER_PORT=1234
         NO_SYS=0
         PICO_DEFAULT_UART_TX_PIN=28)
 target_include_directories(HomeCtrl PRIVATE

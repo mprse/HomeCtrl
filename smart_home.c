@@ -10,10 +10,12 @@
 #include "task.h"
 
 #include <lwip/sockets.h>
-#include"tcp_server.h"
+#include "tcp_server.h"
 #include "pico/bootrom.h"
 #include "dht22.h"
-
+#if WATERING_ENABLED == 1
+#include "hardware/adc.h"
+#endif
 #include "config.h"
 
 #define DHT_ERR_TRESHOLD 5
@@ -94,7 +96,7 @@ static void temp_task()
 
         // Read every 30 sec minute
         gpio_put(dht_power_pin, 0);
-        vTaskDelay(pdMS_TO_TICKS(30000));
+        vTaskDelay(pdMS_TO_TICKS(dht_delay_ms));
     }
 }
 #endif
@@ -125,6 +127,24 @@ static void contactron_task()
         }
         push_con_all = false;
         vTaskDelay(pdMS_TO_TICKS(500));
+    }
+}
+#endif
+
+#if WATERING_ENABLED == 1
+static void watering_task()
+{
+    // Detekt rain using DFRobot SEN0308 sensor
+    char msg[50];
+
+    while (true) {
+        uint16_t result = adc_read();
+        uint adc_percentage = (result * 100) / 4096;
+
+        printf("WATERING: Sensor: %d%%\n", adc_percentage);
+        sprintf(msg, "{\"soil_sensor_id\": \"%d\", \"value\": \"%d\"}", 0, adc_percentage);
+        tcp_send_message(server_connection, msg);
+        vTaskDelay(pdMS_TO_TICKS(watering_sensor_delay_ms));
     }
 }
 #endif
@@ -241,19 +261,24 @@ static void on_tcp_connection(int con_id)
     server_connection = con_id;
 #if DHT_ENABLED == 1
     push_dht_all = true;
-    printf("--> start temp task.\n");
+    printf("--> Start temp task.\n");
     xTaskCreate(temp_task, "TEMP_Task", 1024, NULL, TCP_TASK_PRIORITY+1, NULL);
 #endif
 #if CONT_ENABLED == 1
     push_con_all = true;
-    printf("--> start contactron task.\n");
+    printf("--> Start contactron task.\n");
     xTaskCreate(contactron_task, "CONT_Task", 1024, NULL, TCP_TASK_PRIORITY-1, NULL);
 #endif
 #if BEEPER_ENABLED == 1
     beeper_state = ALARM_OFF;
     next_beeper_state = ALARM_OFF;
-    printf("--> start beeper task.\n");
+    printf("--> Start beeper task.\n");
     xTaskCreate(beeper_task, "BEEP_Task", 1024, NULL, TCP_TASK_PRIORITY+2, NULL);
+#endif
+
+#if WATERING_ENABLED == 1
+    printf("--> Start watering task.\n");
+    xTaskCreate(watering_task, "WATERING_Task", 1024, NULL, TCP_TASK_PRIORITY-1, NULL);
 #endif
 }
 
@@ -307,14 +332,27 @@ static void on_tcp_msg_received(int con_id, char* msg)
         next_beeper_state = ALARM_RUN;
     }
 #endif
-#if HEAT_ENABLED == 1
+#if HEAT_ENABLED == 1 || WATERING_ENABLED == 1
     else if (sscanf(msg, "%s %d %d", command, &zone_id, &state) == 3) {
-        // Check if the command is "heat"
+        bool recognized = false;
+
+#if HEAT_ENABLED == 1
         if (strcmp(command, "heat") == 0) {
-            // Set the pin state based on the zone_id and state
             gpio_put(heat_zone_pins[zone_id], state ? 0 : 1); // Low trigger
             printf("HEAT: Zone[%d]: %s\n", zone_id, state == 0 ? "Disabled" : "Enabled");
-        } else {
+            recognized = true;
+        }
+#endif
+
+#if WATERING_ENABLED == 1
+        if (strcmp(command, "water") == 0) {
+            gpio_put(watering_zone_pins[zone_id], state ? 1 : 0); // High trigger
+            printf("WATER: Zone[%d]: %s\n", zone_id, state == 1 ? "Disabled" : "Enabled");
+            recognized = true;
+        }
+#endif
+
+        if (!recognized) {
             printf("ERROR: Unknown command: %s\n", command);
         }
     } else {
@@ -358,6 +396,17 @@ int main(void)
         gpio_init(heat_zone_pins[i]);
         gpio_set_dir(heat_zone_pins[i], GPIO_OUT);
         gpio_put(heat_zone_pins[i], 1);
+    }
+#endif
+
+#if WATERING_ENABLED == 1
+    // Init watering zones and sensors
+    for (int i = 0; i < WATERING_ZONE_COUNT; i++) {
+        gpio_init(watering_zone_pins[i]);
+        gpio_set_dir(watering_zone_pins[i], GPIO_OUT);
+        gpio_put(watering_zone_pins[i], 1);
+        adc_gpio_init(watering_sensor_pin);
+        adc_select_input(0);
     }
 #endif
 
