@@ -18,9 +18,33 @@
 #endif
 #include "config.h"
 
-#define DHT_ERR_TRESHOLD 5
-
 static int server_connection = -1;
+
+#if WATCHDOG_ENABLED == 1
+static void reset_watchdog_timer() {
+    last_ping_time = xTaskGetTickCount();
+    printf("WATCHDOG: timer reset.\n");
+}
+
+static void watchdog_task(void *pvParameters) {
+    while (true) {
+        // Check if the timeout has been exceeded
+        if ((xTaskGetTickCount() - last_ping_time) > watchdog_timeout) {
+            printf("WATCHDOG: timeout! Rebooting the board...\n");
+            reboot();
+        }
+        vTaskDelay(pdMS_TO_TICKS(watering_sensor_delay_ms)); // Check every second
+    }
+}
+
+static void start_watchdog_timer() {
+    last_ping_time = xTaskGetTickCount(); // Initialize the timer
+    if (watchdog_task_handle == NULL) {
+        xTaskCreate(watchdog_task, "WatchdogTask", 1024, NULL, 1, &watchdog_task_handle);
+        printf("WATCHDOG: task started.\n");
+    }
+}
+#endif
 
 #if DHT_ENABLED == 1
 static bool push_dht_all = false; // push all data to client (sync)
@@ -132,17 +156,36 @@ static void contactron_task()
 #endif
 
 #if WATERING_ENABLED == 1
+static TaskHandle_t watering_task_handle = NULL;
 static void watering_task()
 {
     // Detekt rain using DFRobot SEN0308 sensor
     char msg[50];
 
     while (true) {
-        uint16_t result = adc_read();
-        uint adc_percentage = (result * 100) / 4096;
+        //uint16_t result = 666;//adc_read();
+        //uint adc_percentage = (result * 100) / 4096;
+        uint8_t rain_status = gpio_get(watering_rain_pin);
+        if (rain_status == 0) {
+            printf("WATERING: Detected rain, watering disabled.\n");
+            gpio_put(watering_power_pin, 1); // Disable watering power
+        } else {
+            gpio_put(watering_power_pin, 0); // Enable watering power
+        }
 
-        printf("WATERING: Sensor: %d%%\n", adc_percentage);
-        sprintf(msg, "{\"soil_sensor_id\": \"%d\", \"value\": \"%d\"}", 0, adc_percentage);
+        uint8_t any_zone_active = 0;
+        for (int i = 0; i < WATERING_ZONE_COUNT; i++) {
+            any_zone_active |= !gpio_get(watering_zone_pins[i]);
+        }
+        if (!any_zone_active) {
+            printf("WATERING: No zones are active.\n");
+            gpio_put(watering_power_pin, 1); // Disable watering power
+        } else {
+
+        }
+
+        printf("WATERING: Sensor: %d%%\n", rain_status);
+        sprintf(msg, "{\"rain_status\": \"%d\", \"value\": \"%d\"}", 0, rain_status);
         tcp_send_message(server_connection, msg);
         vTaskDelay(pdMS_TO_TICKS(watering_sensor_delay_ms));
     }
@@ -159,7 +202,7 @@ static void beeper_task()
     while (true) {
         if(beeper_state != next_beeper_state) {
             if(step == 0) {
-                printf("ALARM state: %d\n", beeper_state);
+                printf("BEEP: state: %d\n", beeper_state);
                 beeper_state = next_beeper_state;
                 step = 0;
             }
@@ -167,7 +210,7 @@ static void beeper_task()
         switch(beeper_state) {
             case ALARM_OFF:
                 if(print_flag){
-                    printf("ALARM: OFF\n");
+                    printf("BEEP: OFF\n");
                     print_flag = false;
                 }
                 task_delay = 100;
@@ -176,7 +219,7 @@ static void beeper_task()
                 print_flag = true;
                 switch(step) {
                     case 0:
-                        printf("ALARM: ARM\n");
+                        printf("BEEP: ARM\n");
                         gpio_put(beeper_pin, 1);
                         task_delay = 300;
                         step++;
@@ -203,7 +246,7 @@ static void beeper_task()
                 print_flag = true;
                 switch(step) {
                     case 0:
-                        printf("ALARM: DISARM\n");
+                        printf("BEEP: DISARM\n");
                         gpio_put(beeper_pin, 1);
                         task_delay = 1500;
                         step++;
@@ -220,7 +263,7 @@ static void beeper_task()
                 print_flag = true;
                 switch(step) {
                     case 0:
-                        printf("ALARM: DETECTION\n");
+                        printf("BEEP: DETECTION\n");
                         gpio_put(beeper_pin, 1);
                         task_delay = 300;
                         step++;
@@ -236,7 +279,7 @@ static void beeper_task()
                 print_flag = true;
                 switch(step) {
                     case 0:
-                        printf("ALARM: RUN\n");
+                        printf("BEEP: RUN\n");
                         gpio_put(beeper_pin, 1);
                         task_delay = 1000;
                         step++;
@@ -256,35 +299,47 @@ static void beeper_task()
 
 static void on_tcp_connection(int con_id)
 {
-    printf("--> TCP connected, connection id: %d\n", con_id);
+    printf("TCP: connected, connection id: %d\n", con_id);
     cyw43_arch_gpio_put(0, true);
     server_connection = con_id;
 #if DHT_ENABLED == 1
     push_dht_all = true;
-    printf("--> Start temp task.\n");
+    printf("DHT: Start temp task.\n");
     xTaskCreate(temp_task, "TEMP_Task", 1024, NULL, TCP_TASK_PRIORITY+1, NULL);
 #endif
 #if CONT_ENABLED == 1
     push_con_all = true;
-    printf("--> Start contactron task.\n");
+    printf("CONT: Start contactron task.\n");
     xTaskCreate(contactron_task, "CONT_Task", 1024, NULL, TCP_TASK_PRIORITY-1, NULL);
 #endif
 #if BEEPER_ENABLED == 1
     beeper_state = ALARM_OFF;
     next_beeper_state = ALARM_OFF;
-    printf("--> Start beeper task.\n");
+    printf("BEEP: Start beeper task.\n");
     xTaskCreate(beeper_task, "BEEP_Task", 1024, NULL, TCP_TASK_PRIORITY+2, NULL);
 #endif
 
 #if WATERING_ENABLED == 1
-    printf("--> Start watering task.\n");
-    xTaskCreate(watering_task, "WATERING_Task", 1024, NULL, TCP_TASK_PRIORITY-1, NULL);
+    if (watering_task_handle != NULL) {
+        vTaskDelete(watering_task_handle);
+        watering_task_handle = NULL;
+        printf("WATERING: Deleted existing watering task.\n");
+    }
+    if (xTaskCreate(watering_task, "WATERING_Task", 1024, NULL, TCP_TASK_PRIORITY-1, &watering_task_handle) == pdPASS) {
+        printf("WATERING: Created watering task.\n");
+    } else {
+        printf("WATERING: Failed to create watering task.\n");
+    }
+#endif
+
+#if WATCHDOG_ENABLED == 1
+    start_watchdog_timer();
 #endif
 }
 
 static void on_tcp_disconnection(int con_id)
 {
-    printf("--> TCP disconnected, connection id: %d\n", con_id);
+    printf("TCP: disconnected, connection id: %d\n", con_id);
     cyw43_arch_gpio_put(0, false);
     server_connection = -1;
 }
@@ -294,12 +349,14 @@ static void on_tcp_msg_received(int con_id, char* msg)
     char command[10];
     int zone_id, state;
 
-    printf("> msg(%d): %s\n", con_id, msg);
+    printf("TCP: < (%d): %s\n", con_id, msg);
 
     if (strcmp(msg, "flash") == 0) {
         reset_usb_boot(0, 0);
     } else if (strcmp(msg, "reboot") == 0) {
         reboot();
+    } else if (strcmp(msg, "Hello!") == 0) {
+        printf("TCP: Hello from client :-)\n");
     } else if (strcmp(msg, "sync") == 0) {
 #if DHT_ENABLED == 1
         push_dht_all = true;
@@ -307,6 +364,9 @@ static void on_tcp_msg_received(int con_id, char* msg)
     }
     else if (strcmp(msg, "ping") == 0) {
         tcp_send_message(server_connection, "pong");
+#if WATCHDOG_ENABLED == 1
+        reset_watchdog_timer();
+#endif
     }
 #if GATE_ENABLED == 1
     else if (strcmp(msg, "brama") == 0) {
@@ -346,8 +406,11 @@ static void on_tcp_msg_received(int con_id, char* msg)
 
 #if WATERING_ENABLED == 1
         if (strcmp(command, "water") == 0) {
-            gpio_put(watering_zone_pins[zone_id], state ? 1 : 0); // High trigger
-            printf("WATER: Zone[%d]: %s\n", zone_id, state == 1 ? "Disabled" : "Enabled");
+            if(state == 1) {
+                gpio_put(watering_power_pin, 0);
+            }
+            gpio_put(watering_zone_pins[zone_id], state ? 0 : 1); // Low trigger
+            printf("WATER: Zone[%d]: %s\n", zone_id, state == 0 ? "Disabled" : "Enabled");
             recognized = true;
         }
 #endif
@@ -405,9 +468,18 @@ int main(void)
         gpio_init(watering_zone_pins[i]);
         gpio_set_dir(watering_zone_pins[i], GPIO_OUT);
         gpio_put(watering_zone_pins[i], 1);
-        adc_gpio_init(watering_sensor_pin);
-        adc_select_input(0);
+
     }
+    adc_gpio_init(watering_sensor_pin);
+    adc_select_input(0);
+
+    gpio_init(watering_power_pin);
+    gpio_set_dir(watering_power_pin, GPIO_OUT);
+    gpio_put(watering_power_pin, 1);
+
+    gpio_init(watering_rain_pin);
+    gpio_set_dir(watering_rain_pin, GPIO_IN);
+    gpio_pull_up(watering_rain_pin);
 #endif
 
 #if GATE_ENABLED == 1

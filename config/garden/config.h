@@ -3,6 +3,13 @@
 
 #define ELEMENT_COUNT(array) (sizeof(array) / sizeof(array[0]))
 
+#if WATCHDOG_ENABLED == 1
+static const uint watchdog_timeout_ms = (1 * 60 * 1000);
+static TickType_t last_ping_time = 0;
+static const TickType_t watchdog_timeout = pdMS_TO_TICKS(watchdog_timeout_ms);
+static TaskHandle_t watchdog_task_handle = NULL;
+#endif
+
 #if DHT_ENABLED == 1
 static const uint dht_pins[] = {0, 1, 2, 4, 5, 6};
 static const uint dht_power_pin = 26;
@@ -19,9 +26,11 @@ static const uint heat_zone_pins[] = {7, 8, 9, 10, 11, 12};
 #endif
 
 #if WATERING_ENABLED == 1
-static const uint watering_zone_pins[] = {7, 8, 9, 10, 11, 12};
-static const uint watering_sensor_pin = 13;
-static const uint watering_sensor_delay_ms = (5 * 60 * 1000);
+static const uint watering_zone_pins[] = {7, 8, 9, 6};
+static const uint watering_sensor_pin = 26; // ADC pin
+static const uint watering_rain_pin = 12;
+static const uint watering_power_pin = 10;
+static const uint watering_sensor_delay_ms = (1 * 60 * 1000);
 #define WATERING_ZONE_COUNT ELEMENT_COUNT(watering_zone_pins)
 #endif
 

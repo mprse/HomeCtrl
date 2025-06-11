@@ -29,7 +29,8 @@ target_compile_definitions(HomeCtrl PRIVATE
         HEAT_ENABLED=0
         GATE_ENABLED=0
         BEEPER_ENABLED=0
-        WATERING_ENABLED=0
+        WATERING_ENABLED=1
+        WATCHDOG_ENABLED=1
         TCP_SERVER_PORT=1236
         NO_SYS=0
         PICO_DEFAULT_UART_TX_PIN=28)
