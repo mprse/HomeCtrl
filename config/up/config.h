@@ -49,4 +49,9 @@ static volatile beeper_state_t beeper_state = ALARM_OFF;
 static volatile beeper_state_t next_beeper_state = ALARM_OFF;
 #endif
 
+static inline void reboot()
+{
+    AIRCR_Register = 0x5FA0004;
+}
+
 #endif

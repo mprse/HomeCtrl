@@ -11,6 +11,7 @@
 
 #include <lwip/sockets.h>
 #include "tcp_server.h"
+#include "config.h"
 
 
 static int conn_sock = 0;
@@ -137,10 +138,10 @@ void tcp_server_init(connection_handle_t conn_handle, disconnection_handle_t dis
 
 }
 
-void tcp_send_message(int con_id, char *msg)
+void tcp_send_message(char *msg)
 {
-    if (con_id != -1) {
-        send_message(con_id, msg);
+    if (conn_sock != -1) {
+        send_message(conn_sock, msg);
     }
 }
 

@@ -15,11 +15,17 @@ SET(CMAKE_C_USE_RESPONSE_FILE_FOR_OBJECTS 1)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_CXX_STANDARD 17)
 
-
 add_executable(HomeCtrl
         tcp_server.c
         smart_home.c
-        dht22.c)
+        watchdog.c
+        dht22.c
+        dht.c
+        contactron.c
+        heat.c
+        watering.c
+        beeper.c
+        gate.c)
 
 target_compile_definitions(HomeCtrl PRIVATE
         WIFI_SSID=\"NibyPolinezja\"
