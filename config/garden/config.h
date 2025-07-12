@@ -20,12 +20,15 @@ static const uint heat_zone_pins[] = {7, 8, 9, 10, 11, 12};
 #endif
 
 #if WATERING_ENABLED == 1  && defined(INCLUDE_WATERING)
-static const uint watering_zone_pins[] = {7, 8, 9, 6};
+static const uint watering_zone_pins[] = {7, 8, 9};
 static const uint watering_sensor_pin = 26; // ADC pin
 static const uint watering_rain_pin = 12;
 static const uint watering_power_pin = 10;
-static const uint watering_sensor_delay_ms = (1 * 60 * 1000);
+static const uint watering_light_pin = 6;
+static const uint watering_status_delay_ms = (15 * 1000);
+static const uint watering_zone_max_active_time_ms = (30 * 1000 * 60); // 30 minutes
 #define WATERING_ZONE_COUNT ELEMENT_COUNT(watering_zone_pins)
+static TickType_t zone_active_since[WATERING_ZONE_COUNT] = {0};
 #endif
 
 #if CONT_ENABLED == 1 && defined(INCLUDE_CONT)

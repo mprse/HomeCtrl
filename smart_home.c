@@ -70,7 +70,7 @@ static void on_tcp_disconnection(int con_id)
 
 static void on_tcp_msg_received(int con_id, char* msg)
 {
-    char command[10];
+    char command[32];
     int zone_id, state;
 
     printf("TCP: < (%d): %s\n", con_id, msg);
@@ -131,6 +131,11 @@ static void on_tcp_msg_received(int con_id, char* msg)
             }
             watering_set_zone(zone_id, state);
             printf("WATER: Zone[%d]: %s\n", zone_id, state == 0 ? "Disabled" : "Enabled");
+            recognized = true;
+        }
+        if (strcmp(command, "water_garden_light") == 0) {
+            watering_set_light(state);
+            printf("WATER: Garden light: %s\n", state == 0 ? "Off" : "On");
             recognized = true;
         }
 #endif /* WATERING_ENABLED */
