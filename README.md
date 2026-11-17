@@ -1,124 +1,137 @@
-# HomeCtrl - Modular Smart Home Controller for Raspberry Pi Pico
+# HomeCtrl
 
-## Overview
+HomeCtrl is a Raspberry Pi Pico W firmware project for smart-home and garden automation. It combines the Pico SDK, FreeRTOS, and a small TCP command interface to control relays, sensors, safety logic, and local automation tasks from a controller board.
 
-**HomeCtrl** is a modular smart home controller project for Raspberry Pi Pico (RP2040), designed to manage various subsystems in your home and garden.  
-It supports multiple hardware configurations, all from a single codebase, using flexible macros and configuration files.
+The project is built around a common firmware and multiple hardware profiles located under `config/`.
 
-### Supported Features
+## Features
 
-- **Contactron (door/window sensors) monitoring**
-- **Heating control (multiple zones)**
-- **Temperature & humidity sensors (DHT)**
-- **Alarm system**
-- **Garden watering (multiple zones, rain sensor, soil moisture sensor, safety fuse)**
-- **Garden light control**
-- **Watchdog for reliability**
-- **TCP server for integration with Fibaro Home Center 3**
-- **UART logging for debugging**
-- **Safety fuse: only one watering zone active at a time, auto-disable after 30 minutes**
-- **Power management: disables watering power if all zones inactive for 1 minute or rain detected**
+The firmware supports these areas, depending on the selected configuration:
 
-### Configurations
+- DHT22 temperature and humidity sensors
+- Heating zone control
+- Contactron door/window status monitoring
+- Gate control
+- Beeper / alarm outputs
+- Garden watering with multiple zones
+- Rain and soil-related safety logic
+- Awning position control
+- Watchdog support and reboot handling
+- TCP server for command and status exchange
+- Pico W Wi-Fi connectivity via the CyW43 driver
 
-You can build firmware for three main setups:
-- **Down (Parter):** Contactrons, heating, DHT sensors, alarm
-- **Up (First Floor):** Heating, DHT sensors
-- **Garden:** Watering zones, garden light, rain sensor, soil moisture sensor
+## Supported build profiles
 
-All features and pin assignments are controlled by macros and config files (`config.h`).
+The repo includes three configuration profiles:
 
-**Note:** These are example configurations—you can freely adapt or extend them to match your own smart home needs.
+- `down` — downstairs configuration with contactrons, heating, DHT, and alarm logic
+- `up` — upper-level configuration with heating and DHT
+- `garden` — garden configuration with watering, awning, and related outdoor automation
 
----
+These are defined in:
 
-## Getting Started
+- `config/down/`
+- `config/up/`
+- `config/garden/`
 
-### 1. Clone the repository
+Each profile contains a `CMakeLists.txt` and a `config.h` that enable the relevant modules and GPIO mappings.
+
+## Project layout
+
+- `smart_home.c` — main firmware entry point and command processing
+- `tcp_server.c` / `tcp_server.h` — TCP listener and communication layer
+- `watchdog.c` / `watchdog.h` — watchdog management
+- `dht.c`, `dht22.c`, `heat.c`, `watering.c`, `gate.c`, `beeper.c`, `awning.c`, `contactron.c` — subsystem implementations
+- `config/` — configuration-specific hardware definitions
+- `build.sh` — convenience script for selecting a config and building the firmware
+- `build/` — generated build output
+
+## Requirements
+
+- Raspberry Pi Pico W (or Pico-compatible board with Wi-Fi support)
+- CMake
+- Pico SDK
+- FreeRTOS kernel sources included in this repo
+- GNU patch tool if you plan to apply the SMP patch helper used by `build.sh`
+
+## Initial setup
+
+Clone the repository and initialize its submodules:
 
 ```bash
-git clone https://github.com/yourusername/HomeCtrl.git
+git clone https://github.com/mprse/HomeCtrl.git
 cd HomeCtrl
-```
-
-### 2. Initialize submodules
-
-This project uses the Raspberry Pi Pico SDK and FreeRTOS as submodules.  
-**Run:**
-```bash
 git submodule update --init --recursive
 ```
 
-### 3. Configure your hardware
+## Building
 
-- Edit the appropriate config file (e.g. `config/garden/config.h`, `config/down/config.h`, `config/up/config.h`) to match your hardware setup.
-- Set enabled features and GPIO pin assignments using macros.
+The project uses a build script that copies the selected config into the project root before configuring CMake:
 
-### 4. Build the firmware
-
-Use the provided build script:
 ```bash
-./build.sh <config_name>
+./build.sh down
+./build.sh up
+./build.sh garden
 ```
-This will configure and build the project using CMake and the Pico SDK.
 
-### 5. Flash the firmware
+This script:
 
-- Connect your Pico in bootloader mode (hold BOOTSEL while plugging in USB).
-- Copy the generated `.uf2` file from the `build` directory to the Pico's USB drive (usually `/media/$USER/RPI-RP2/`).
+1. validates the selected configuration name,
+2. copies `config/<name>/CMakeLists.txt` and `config/<name>/config.h` into the root,
+3. creates or reuses `build/`,
+4. runs CMake and `make` for the Pico W target.
 
----
+## Flashing
 
-## UART Logging
+After a successful build, the generated UF2 file is placed in the `build/` directory. To flash it:
 
-To view logs for debugging:
+1. hold the BOOTSEL button on the Pico,
+2. connect the board over USB,
+3. copy the generated `.uf2` file to the Pico mass storage device.
 
-1. **Connect a USB-UART converter:**
-   - Pico TX (default: GPIO 28, configurable in `CMakeLists.txt`) → UART RX
-   - Pico GND → UART GND
+The helper script also supports `--flash`, but that requires the environment variables `UF2_FILE` and `PICO_MOUNT` to be set correctly for your system.
 
-2. **Open a serial terminal:**
-   - Baud rate: `115200`
-   - Data bits: `8`
-   - Parity: `None`
-   - Stop bits: `1`
+## Hardware configuration
 
----
+The actual I/O mapping is not hardcoded in the firmware; it is defined in the selected `config.h`. This makes the same firmware usable across different installations by adjusting GPIO numbers and feature flags.
 
-## Integration with Fibaro
+Common feature flags in the build definitions are:
 
-- The controller communicates with Fibaro QuickApp via TCP.
-- Status messages are sent in JSON format every 15–30 seconds, e.g.:
-  ```json
-  {"watering_power":1,"light":0,"zones":[0,0,0],"rain_status":0}
-  ```
-- QuickApp parses these messages and updates device states accordingly.
+- `DHT_ENABLED`
+- `CONT_ENABLED`
+- `HEAT_ENABLED`
+- `GATE_ENABLED`
+- `BEEPER_ENABLED`
+- `WATERING_ENABLED`
+- `AWNING_ENABLED`
+- `WATCHDOG_ENABLED`
 
----
+## TCP / control interface
 
-## Safety & Reliability
+The firmware starts a TCP server and reacts to commands such as:
 
-- **Watchdog:** Automatically restarts the board if communication is lost.
-- **Zone fuse:** Only one watering zone can be active at a time; each zone is auto-disabled after 30 minutes.
-- **Rain detection:** Watering is disabled during rain.
-- **Power management:** Watering power is disabled if all zones are inactive for 1 minute.
+- `ping` → responds with `pong`
+- `flash` → reboots into USB bootloader
+- `reboot` → software reboot
+- `heat <zone> <state>`
+- `water <zone> <state>`
+- `water_garden_light <state>`
+- `awning up|stop|down`
+- `brama`
+- `alarm_off`, `alarm_arm`, `alarm_disarm`, `alarm_detect`, `alarm_run`
 
----
+The project is intended to be controlled from a home automation controller or a custom client application.
 
-## Dependencies
+## Serial logging
 
-- **Raspberry Pi Pico SDK**
-- **FreeRTOS**
-- **CMake**
+The firmware uses stdio over UART and prints status information to the serial console at 115200 baud. This is useful for debugging sensor activity, watchdog events, and TCP command handling.
 
-All dependencies are included as submodules.
+## Notes
 
----
+- The project is built for a Pico W and expects Wi-Fi credentials to be configured in the selected build definition (`WIFI_SSID` and `WIFI_PASSWORD`).
+- The code uses feature guards heavily, so the same codebase can be compiled for different physical installations.
+- The README and configuration files are meant to be adjusted for your exact wiring and home setup.
 
 ## License
 
-MIT License
-
----
-
-**For questions, issues, or feature requests, open an issue on GitHub!**
+This project is distributed under the same license terms as the repository itself unless otherwise noted in a specific file.
